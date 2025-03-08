@@ -15,4 +15,4 @@ Overlay Media Player is an open-source, lightweight, transparent media player bu
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/Overlay-Media-Player.git
+   git clone https://github.com/saivinay1805/overlay-media-player.git
