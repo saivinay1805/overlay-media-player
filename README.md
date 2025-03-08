@@ -11,6 +11,11 @@ Overlay Media Player is an open-source, lightweight, transparent media player bu
 - Context menu for playback control
 - Support for .webm and .mp4 files
 
+## Download
+
+Download the latest version of Overlay Media Player:
+- [Overlay Media Player v1.0.0 (.dmg)](https://github.com/saivinay1805/overlay-media-player/releases/download/v1.0.0/Overlay-Media-Player-1.0.0.dmg)
+
 ## Installation
 
 1. Clone the repository:
