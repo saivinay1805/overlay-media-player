@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Overlay Media Player</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background: transparent; /* Fully transparent */
+      overflow: hidden;
+      border: none; /* Ensure no border */
+    }
+    canvas {
+      display: block;
+      width: 100vw; /* Match window width */
+      height: 100vh; /* Match window height */
+      position: absolute;
+      top: 0;
+      left: 0;
+      border: none; /* Ensure no border */
+    }
+    #no-videos-message {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 16px;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    #video-slider {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      max-width: 500px;
+      opacity: 0.7;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 5px;
+      padding: 5px;
+      display: none; /* Hidden by default */
+    }
+    #video-slider input {
+      width: 100%;
+      appearance: none;
+      height: 5px;
+      background: #333;
+      outline: none;
+      opacity: 0.7;
+      -webkit-transition: .2s;
+      transition: opacity .2s;
+    }
+    #video-slider input:hover {
+      opacity: 1;
+    }
+    #video-slider input::-webkit-slider-thumb {
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      background: #fff;
+      cursor: pointer;
+      border-radius: 50%;
+    }
+    #video-slider input::-moz-range-thumb {
+      width: 15px;
+      height: 15px;
+      background: #fff;
+      cursor: pointer;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <video id="video" preload="auto" loop hidden></video>
+  <div id="no-videos-message">No videos found. Please select a folder with .webm or .mp4 files.</div>
+  <div id="video-slider">
+    <input type="range" id="slider" min="0" max="100" value="0">
+  </div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    let videos = [];
+    let currentIndex = 0;
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { alpha: true });
+    const noVideosMessage = document.getElementById('no-videos-message');
+    const slider = document.getElementById('slider');
+    let isPlaying = true;
+    let clickCount = 0;
+    let clickTimeout;
+    let isDragging = false;
+    let lastScreenX, lastScreenY;
+    let isTransparencyEnabled = false; // Track transparency state
+    let chromaKeyColor = '#000000'; // Default to black
+    let frameSkipCounter = 0; // For skipping frames to optimize performance
+
+    // Function to load videos
+    function loadVideos() {
+      noVideosMessage.style.display = 'none'; // Hide message initially
+      ipcRenderer.invoke('get-video-list').then(videoList => {
+        videos = videoList;
+        if (videos.length === 0) {
+          console.error('No videos found in selected folder');
+          noVideosMessage.style.display = 'block'; // Show message if no videos
+          return;
+        }
+        currentIndex = 0; // Reset index when loading new videos
+        initializeVideo();
+      }).catch(err => {
+        console.error('Error loading videos:', err);
+        noVideosMessage.style.display = 'block';
+      });
+    }
+
+    // Listen for the load-videos event from main process
+    ipcRenderer.on('load-videos', () => {
+      loadVideos();
+    });
+
+    // Listen for resize-canvas event from main process
+    ipcRenderer.on('resize-canvas', () => {
+      updateCanvasSize();
+      clearCanvas();
+      console.log('Canvas resized to match window');
+    });
+
+    // Listen for slider visibility update
+    ipcRenderer.on('update-slider-visibility', (event, visible) => {
+      const sliderDiv = document.getElementById('video-slider');
+      sliderDiv.style.display = visible ? 'block' : 'none';
+      console.log('Slider visibility updated to:', visible);
+      if (visible) {
+        updateSlider();
+      }
+    });
+
+    // Listen for transparency update
+    ipcRenderer.on('update-transparency', (event, enabled) => {
+      isTransparencyEnabled = enabled;
+      console.log('Transparency updated to:', enabled);
+      frameSkipCounter = 0; // Reset frame skip counter
+      drawFrame(); // Redraw to apply new transparency setting
+    });
+
+    // Listen for chroma key color update
+    ipcRenderer.on('update-chroma-key-color', (event, color) => {
+      chromaKeyColor = color;
+      console.log('Chroma key color updated to:', color);
+      drawFrame(); // Redraw to apply new color
+    });
+
+    // Handle request to open color picker
+    ipcRenderer.on('select-chroma-key-color', () => {
+      ipcRenderer.send('select-chroma-key-color');
+    });
+
+    function initializeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      clearCanvas();
+    }
+    initializeCanvas();
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function updateCanvasSize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      drawFrame();
+    }
+
+    function initializeVideo() {
+      setTimeout(() => {
+        video.src = videos[currentIndex];
+        video.load();
+      }, 200);
+    }
+
+    video.addEventListener('loadedmetadata', () => {
+      updateCanvasSize();
+      clearCanvas();
+      updateSlider(); // Update slider max value based on video duration
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.error('Initial video play failed:', error);
+          video.play().catch(fallbackError => {
+            console.error('Fallback video play failed:', fallbackError);
+          });
+        }).then(() => {
+          drawFrame();
+        });
+      }
+    });
+
+    video.addEventListener('timeupdate', () => {
+      if (document.getElementById('video-slider').style.display !== 'none') {
+        updateSlider();
+      }
+    });
+
+    video.addEventListener('error', (e) => {
+      console.error('Video error:', e);
+    });
+
+    video.addEventListener('ended', () => {
+      clearCanvas();
+      video.currentTime = 0;
+      updateSlider();
+    });
+
+    function updateSlider() {
+      if (video.duration) {
+        const percentage = (video.currentTime / video.duration) * 100;
+        slider.value = percentage;
+        slider.max = 100; // Percentage-based slider
+      }
+    }
+
+    function hexToRgb(hex) {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return { r, g, b };
+    }
+
+    function applyTransparency(imageData) {
+      if (!isTransparencyEnabled) return imageData;
+
+      const data = imageData.data;
+      const tolerance = 20; // Adjust this value to control how strict the keying is (0-255)
+      const keyColor = hexToRgb(chromaKeyColor);
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+
+        // Check if pixel is close to the key color (with tolerance)
+        const isKeyColor =
+          Math.abs(r - keyColor.r) < tolerance &&
+          Math.abs(g - keyColor.g) < tolerance &&
+          Math.abs(b - keyColor.b) < tolerance;
+        if (isKeyColor && a > 0) {
+          // Preserve edges by checking neighboring pixels (simple approach)
+          const x = (i / 4) % canvas.width;
+          const y = Math.floor((i / 4) / canvas.width);
+          let hasNonKeyColorNeighbor = false;
+
+          // Check a 3x3 neighborhood (simplified edge preservation)
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dy === 0 && dx === 0) continue;
+              const neighborX = x + dx;
+              const neighborY = y + dy;
+              if (neighborX >= 0 && neighborX < canvas.width && neighborY >= 0 && neighborY < canvas.height) {
+                const neighborIndex = (neighborY * canvas.width + neighborX) * 4;
+                const nr = data[neighborIndex];
+                const ng = data[neighborIndex + 1];
+                const nb = data[neighborIndex + 2];
+                if (
+                  Math.abs(nr - keyColor.r) > tolerance ||
+                  Math.abs(ng - keyColor.g) > tolerance ||
+                  Math.abs(nb - keyColor.b) > tolerance
+                ) {
+                  hasNonKeyColorNeighbor = true;
+                  break;
+                }
+              }
+            }
+            if (hasNonKeyColorNeighbor) break;
+          }
+
+          // If no non-key color neighbors, set alpha to 0 (remove background)
+          if (!hasNonKeyColorNeighbor) {
+            data[i + 3] = 0;
+          }
+        }
+      }
+      return imageData;
+    }
+
+    function drawFrame() {
+      if (document.visibilityState === 'visible' && !isDragging) {
+        clearCanvas();
+        if (video.readyState >= 2) {
+          const aspectRatio = video.videoWidth / video.videoHeight;
+          const windowAspectRatio = canvas.width / canvas.height;
+          let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+
+          // Limit internal resolution to 720p for performance
+          const maxWidth = 1280;
+          const maxHeight = 720;
+          if (video.videoWidth > maxWidth || video.videoHeight > maxHeight) {
+            const scale = Math.min(maxWidth / video.videoWidth, maxHeight / video.videoHeight);
+            drawWidth = video.videoWidth * scale;
+            drawHeight = video.videoHeight * scale;
+          } else {
+            if (windowAspectRatio > aspectRatio) {
+              drawHeight = canvas.height;
+              drawWidth = drawHeight * aspectRatio;
+              offsetX = (canvas.width - drawWidth) / 2;
+            } else {
+              drawWidth = canvas.width;
+              drawHeight = drawWidth / aspectRatio;
+              offsetY = (canvas.height - drawHeight) / 2;
+            }
+          }
+
+          ctx.globalCompositeOperation = 'copy';
+          ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+
+          // Apply transparency only every other frame to reduce load
+          if (isTransparencyEnabled && frameSkipCounter % 2 === 0) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const processedData = applyTransparency(imageData);
+            ctx.putImageData(processedData, 0, 0);
+          }
+          frameSkipCounter = (frameSkipCounter + 1) % 2; // Toggle between 0 and 1
+
+          ctx.globalCompositeOperation = 'source-over';
+        } else {
+          console.log('Video not ready, state:', video.readyState);
+        }
+      }
+      requestAnimationFrame(drawFrame);
+    }
+
+    function playNext() {
+      currentIndex = (currentIndex + 1) % videos.length;
+      video.src = videos[currentIndex];
+      clearCanvas();
+      video.load();
+      video.addEventListener('loadedmetadata', () => {
+        updateCanvasSize();
+        updateSlider();
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.error('Next video play failed:', error);
+          }).then(() => {
+            drawFrame();
+          });
+        }
+      }, { once: true });
+      console.log('Playing next video, index:', currentIndex);
+    }
+
+    function playPrevious() {
+      currentIndex = (currentIndex - 1 + videos.length) % videos.length;
+      video.src = videos[currentIndex];
+      clearCanvas();
+      video.load();
+      video.addEventListener('loadedmetadata', () => {
+        updateCanvasSize();
+        updateSlider();
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.error('Previous video play failed:', error);
+          }).then(() => {
+            drawFrame();
+          });
+        }
+      }, { once: true });
+      console.log('Playing previous video, index:', currentIndex);
+    }
+
+    function playRandom() {
+      currentIndex = Math.floor(Math.random() * videos.length);
+      video.src = videos[currentIndex];
+      clearCanvas();
+      video.load();
+      video.addEventListener('loadedmetadata', () => {
+        updateCanvasSize();
+        updateSlider();
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.error('Random video play failed:', error);
+          }).then(() => {
+            drawFrame();
+          });
+        }
+      }, { once: true });
+      console.log('Playing random video, index:', currentIndex);
+    }
+
+    function togglePausePlay() {
+      if (isPlaying) {
+        video.pause();
+      } else {
+        video.play();
+      }
+      isPlaying = !isPlaying;
+      console.log('Toggled pause/play, isPlaying:', isPlaying);
+    }
+
+    // Slider control for rewind/fast-forward
+    slider.addEventListener('input', () => {
+      if (video.duration) {
+        const percentage = slider.value / 100;
+        video.currentTime = percentage * video.duration;
+        console.log('Slider moved to:', video.currentTime, 'seconds');
+      }
+    });
+
+    ipcRenderer.on('video-selected', (event, filePath) => {
+      console.log('Renderer: Received video-selected, filePath:', filePath);
+      if (filePath) {
+        video.src = filePath;
+        clearCanvas();
+        video.load();
+        video.addEventListener('loadedmetadata', () => {
+          updateCanvasSize();
+          updateSlider();
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(error => {
+              console.error('Selected video play failed:', error);
+            }).then(() => {
+              drawFrame();
+            });
+          }
+        }, { once: true });
+      } else {
+        console.log('Renderer: No video selected');
+      }
+    });
+
+    // Custom drag handler using screen coordinates
+    canvas.addEventListener('mousedown', async (e) => {
+      if (e.button === 0) {
+        isDragging = true;
+        lastScreenX = e.screenX;
+        lastScreenY = e.screenY;
+        console.log('Drag started at:', lastScreenX, lastScreenY);
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        const deltaX = e.screenX - lastScreenX;
+        const deltaY = e.screenY - lastScreenY;
+        lastScreenX = e.screenX;
+        lastScreenY = e.screenY;
+        ipcRenderer.send('move-window', deltaX, deltaY);
+        console.log('Dragging, delta:', deltaX, deltaY);
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (e.button === 0) {
+        isDragging = false;
+        console.log('Drag ended');
+        const win = BrowserWindow.getFocusedWindow();
+        if (win) win.webContents.invalidate();
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (isDragging) {
+        isDragging = false;
+        console.log('Drag ended due to mouse leave');
+        const win = BrowserWindow.getFocusedWindow();
+        if (win) win.webContents.invalidate();
+      }
+    });
+
+    // Double-click for Next
+    canvas.addEventListener('click', (e) => {
+      if (!isDragging) {
+        clickCount++;
+        if (clickCount === 1) {
+          clickTimeout = setTimeout(() => {
+            clickCount = 0;
+          }, 300);
+        } else if (clickCount === 2) {
+          clearTimeout(clickTimeout);
+          clickCount = 0;
+          playNext();
+        }
+      }
+    });
+
+    // Right-click context menu
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      ipcRenderer.send('show-context-menu');
+      console.log('Renderer: Sent show-context-menu request');
+    });
+
+    // Handle context menu actions
+    ipcRenderer.on('toggle-pause-play', () => {
+      togglePausePlay();
+      console.log('Renderer: Handled toggle-pause-play');
+    });
+
+    ipcRenderer.on('play-random', () => {
+      playRandom();
+      console.log('Renderer: Handled play-random');
+    });
+
+    ipcRenderer.on('play-previous', () => {
+      playPrevious();
+      console.log('Renderer: Handled play-previous');
+    });
+
+    // Focus handling
+    window.addEventListener('focus', () => {
+      clearCanvas();
+      video.play();
+      requestAnimationFrame(drawFrame);
+    });
+
+    window.addEventListener('blur', () => {
+      clearCanvas();
+      setTimeout(() => {
+        clearCanvas();
+      }, 75);
+    });
+
+    window.addEventListener('resize', () => {
+      updateCanvasSize();
+      clearCanvas();
+    });
+  </script>
+</body>
+</html>

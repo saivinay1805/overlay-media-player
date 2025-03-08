@@ -1,0 +1,31 @@
+{
+  "name": "overlay-media-player",
+  "productName": "Overlay Media Player",
+  "version": "1.0.0",
+  "description": "A transparent, always-on-top media player with chroma key support",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.example.overlaymediaplayer",
+    "productName": "Overlay Media Player",
+    "mac": {
+      "category": "public.app-category.video"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "color-picker.html",
+      "videos/**/*"
+    ]
+  },
+  "author": "saivinay1805",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^13.0.0",
+    "electron-builder": "^22.0.0"
+  },
+  "dependencies": {}
+}
