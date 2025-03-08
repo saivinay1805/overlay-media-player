@@ -14,8 +14,11 @@ Overlay Media Player is an open-source, lightweight, transparent media player bu
 ## Download
 
 Download the latest version of Overlay Media Player:
-- [Overlay Media Player v1.0.0 (.dmg)](https://github.com/saivinay1805/overlay-media-player/releases/download/v1.0.0/Overlay.Media.Player-1.0.0-arm64.dmg)
+- [macOS Silicon (ARM) v1.0.1](https://github.com/saivinay1805/overlay-media-player/releases/download/v1.0.1/Overlay-Media-Player-1.0.1-arm64.dmg)
+- [macOS Intel v1.0.1](https://github.com/saivinay1805/overlay-media-player/releases/download/v1.0.1/Overlay-Media-Player-1.0.1-x64.dmg)
+- [Windows v1.0.1](https://github.com/saivinay1805/overlay-media-player/releases/download/v1.0.1/Overlay-Media-Player-Setup-1.0.1.exe)
 
+  
 ## Installation
 
 1. Clone the repository:
